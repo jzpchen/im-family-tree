@@ -76,16 +76,17 @@
         }
         .link {
             fill: none;
-            stroke: #666;
+            stroke: #ccc;
             stroke-width: 2px;
+            stroke-dasharray: 5,5;
         }
         .relationship-label {
             font-size: 12px;
-            fill: #666;
+            fill: #999;
         }
         .relationship-label.spouse {
             font-size: 14px;
-            fill: #000;
+            fill: #666;
         }
         .node text {
             font-size: 14px;
@@ -341,7 +342,7 @@
                 }))).id(d => d.id).distance(100))
                 .force('charge', d3.forceManyBody().strength(-500))
                 .force('collide', d3.forceCollide().radius(40))
-                .force('x', d3.forceX().x(d => d.x).strength(0.3))
+                .force('x', d3.forceX().x(d => d.x).strength(0.5))
                 .force('y', d3.forceY().y(d => d.y).strength(1));
 
             const links = svg.append('g')
@@ -385,10 +386,10 @@
 
             function dragged(event, d) {
                 d.fx = event.x;
-                // Keep vertical position within bounds
+                // Keep vertical position exactly at generation level
                 const normalizedGen = maxGen - d.generation;
                 const baseY = topMargin + (normalizedGen * generationHeight);
-                d.fy = Math.max(baseY - 20, Math.min(baseY + 20, event.y));
+                d.fy = baseY;
             }
 
             function dragended(event, d) {
@@ -402,10 +403,10 @@
                 people.forEach(person => {
                     person.x = Math.max(40, Math.min(width - 40, person.x));
                     
-                    // Keep vertical position near generation level
+                    // Keep vertical position exactly at generation level
                     const normalizedGen = maxGen - person.generation;
                     const baseY = topMargin + (normalizedGen * generationHeight);
-                    person.y = Math.max(baseY - 20, Math.min(baseY + 20, person.y));
+                    person.y = baseY;
                 });
 
                 links.selectAll('line')
