@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family Tree</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            width: 300px;
+        }
+        .visualization {
+            flex-grow: 1;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 600px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #familyTree {
+            width: 100%;
+            height: 600px;
+            border: 1px solid #ccc;
+            margin: 20px 0;
+        }
+        .node circle {
+            fill: #fff;
+            stroke: #666;
+            stroke-width: 2px;
+        }
+        .link {
+            fill: none;
+            stroke: #666;
+            stroke-width: 2px;
+        }
+        .relationship-label {
+            font-size: 12px;
+            fill: #666;
+        }
+        .relationship-label.spouse {
+            font-size: 14px;
+            fill: #000;
+        }
+        .node text {
+            font-size: 14px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Family Tree</h1>
+    <div class="container">
+        <div class="controls">
+            <div class="form-group">
+                <label for="personName">Person Name:</label>
+                <input type="text" id="personName" placeholder="Enter name">
+            </div>
+            <button onclick="addPerson()">Add Person</button>
+
+            <hr>
+
+            <div class="form-group">
+                <label for="relationshipType">Relationship Type:</label>
+                <select id="relationshipType" onchange="updateRelationshipForm()">
+                    <option value="parent">Parent-Child</option>
+                    <option value="spouse">Spouse</option>
+                </select>
+            </div>
+
+            <div id="parentChildInputs">
+                <div class="form-group">
+                    <label for="person1">Parent:</label>
+                    <select id="person1"></select>
+                </div>
+                <div class="form-group">
+                    <label for="person2">Child:</label>
+                    <select id="person2"></select>
+                </div>
+            </div>
+
+            <div id="spouseInputs" style="display: none;">
+                <div class="form-group">
+                    <label for="spouse1">Person 1:</label>
+                    <select id="spouse1"></select>
+                </div>
+                <div class="form-group">
+                    <label for="spouse2">Person 2:</label>
+                    <select id="spouse2"></select>
+                </div>
+            </div>
+
+            <button onclick="addRelationship()">Add Relationship</button>
+        </div>
+        <div class="visualization" id="familyTree"></div>
+    </div>
+
+    <script>
+        let simulation = null;
+        let people = []; // Keep this as global for dropdowns
+        let currentData = null; // Store current data for resize handling
+            
+        function clearVisualization() {
+            d3.select('#familyTree').selectAll('*').remove();
+            if (simulation) {
+                simulation.stop();
+                simulation = null;
+            }
+        }
+
+        // Debounce function to prevent too many resize events
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Handle window resize
+        const handleResize = debounce(() => {
+            if (currentData && currentData.people && currentData.relationships) {
+                clearVisualization();
+                createVisualization(currentData.people, currentData.relationships);
+            }
+        }, 250); // Wait 250ms after resize ends before redrawing
+
+        window.addEventListener('resize', handleResize);
+
+        async function refreshVisualization() {
+            try {
+                const response = await fetch('/api/get_family_tree');
+                const data = await response.json();
+                
+                if (!data.people || !data.relationships) {
+                    console.error('Invalid data structure:', data);
+                    return;
+                }
+
+                // Store current data for resize handling
+                currentData = data;
+                
+                // Update global people array for dropdowns
+                people = data.people;
+                updatePersonSelects();
+
+                clearVisualization();
+                createVisualization(data.people, data.relationships);
+            } catch (error) {
+                console.error('Error refreshing visualization:', error);
+            }
+        }
+
+        function updatePersonSelects() {
+            const selects = ['person1', 'person2', 'spouse1', 'spouse2'];
+            selects.forEach(selectId => {
+                const select = document.getElementById(selectId);
+                if (select) {
+                    const currentValue = select.value; // Store current selection
+                    select.innerHTML = '<option value="">Select a person</option>';
+                    people.forEach(person => {
+                        const option = document.createElement('option');
+                        option.value = person.id;
+                        option.textContent = person.name;
+                        select.appendChild(option);
+                    });
+                    if (currentValue) select.value = currentValue; // Restore selection if it exists
+                }
+            });
+        }
+
+        async function addPerson() {
+            const name = document.getElementById('personName').value;
+            if (!name) return;
+
+            try {
+                const response = await fetch('/api/add_person', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                document.getElementById('personName').value = '';
+                await refreshVisualization();
+            } catch (error) {
+                console.error('Error adding person:', error);
+            }
+        }
+
+        function updateRelationshipForm() {
+            const relationType = document.getElementById('relationshipType').value;
+            const parentChildInputs = document.getElementById('parentChildInputs');
+            const spouseInputs = document.getElementById('spouseInputs');
+            
+            if (relationType === 'parent') {
+                parentChildInputs.style.display = 'block';
+                spouseInputs.style.display = 'none';
+            } else if (relationType === 'spouse') {
+                parentChildInputs.style.display = 'none';
+                spouseInputs.style.display = 'block';
+            }
+        }
+
+        async function addRelationship() {
+            const relationType = document.getElementById('relationshipType').value;
+            let person1_id, person2_id;
+            
+            if (relationType === 'parent') {
+                person1_id = document.getElementById('person1').value;
+                person2_id = document.getElementById('person2').value;
+            } else if (relationType === 'spouse') {
+                person1_id = document.getElementById('spouse1').value;
+                person2_id = document.getElementById('spouse2').value;
+            }
+
+            if (!person1_id || !person2_id) {
+                alert('Please select both people for the relationship');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/add_relationship', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ person1_id, person2_id, relationship_type: relationType }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Reset form
+                document.getElementById('relationshipType').value = 'parent';
+                document.getElementById('person1').value = '';
+                document.getElementById('person2').value = '';
+                document.getElementById('spouse1').value = '';
+                document.getElementById('spouse2').value = '';
+                updateRelationshipForm();
+
+                await refreshVisualization();
+            } catch (error) {
+                console.error('Error adding relationship:', error);
+            }
+        }
+
+        function createVisualization(people, relationships) {
+            const container = document.getElementById('familyTree');
+            const width = container.offsetWidth;
+            const height = container.offsetHeight;
+            const generationHeight = 80;
+            const topMargin = 40;
+
+            const svg = d3.select('#familyTree')
+                .append('svg')
+                .attr('width', '100%')
+                .attr('height', '100%')
+                .attr('viewBox', [0, 0, width, height])
+                .attr('preserveAspectRatio', 'xMidYMid meet');
+
+            // Calculate generation levels
+            const maxGen = Math.max(...people.map(p => p.generation));
+            const minGen = Math.min(...people.map(p => p.generation));
+            const totalGenerations = maxGen - minGen + 1;
+
+            // Initial node positioning
+            people.forEach(person => {
+                const genSize = people.filter(p => p.generation === person.generation).length;
+                const genIndex = people.filter(p => p.generation === person.generation)
+                    .findIndex(p => p.id === person.id);
+                
+                // Center horizontally within generation
+                person.x = (width * (genIndex + 1)) / (genSize + 1);
+                
+                // Position vertically based on generation
+                const normalizedGen = maxGen - person.generation;
+                person.y = topMargin + (normalizedGen * generationHeight);
+            });
+
+            simulation = d3.forceSimulation(people)
+                .force('link', d3.forceLink(relationships.map(r => ({
+                    source: people.find(p => p.id === r.person1_id),
+                    target: people.find(p => p.id === r.person2_id),
+                    type: r.type
+                }))).id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-500))
+                .force('collide', d3.forceCollide().radius(40))
+                .force('x', d3.forceX().x(d => d.x).strength(0.3))
+                .force('y', d3.forceY().y(d => d.y).strength(1));
+
+            const links = svg.append('g')
+                .selectAll('g')
+                .data(relationships)
+                .enter()
+                .append('g');
+
+            links.append('line')
+                .attr('class', d => `link ${d.type}`);
+
+            links.append('text')
+                .attr('class', d => `relationship-label ${d.type}`)
+                .attr('text-anchor', 'middle')
+                .html(d => d.type === 'spouse' ? '❤️' : '');
+
+            const nodes = svg.append('g')
+                .selectAll('g')
+                .data(people)
+                .enter()
+                .append('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            nodes.append('circle')
+                .attr('r', 30);
+
+            nodes.append('text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '.3em')
+                .text(d => d.name);
+
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                // Keep vertical position within bounds
+                const normalizedGen = maxGen - d.generation;
+                const baseY = topMargin + (normalizedGen * generationHeight);
+                d.fy = Math.max(baseY - 20, Math.min(baseY + 20, event.y));
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+
+            simulation.on('tick', () => {
+                // Keep nodes within bounds
+                people.forEach(person => {
+                    person.x = Math.max(40, Math.min(width - 40, person.x));
+                    
+                    // Keep vertical position near generation level
+                    const normalizedGen = maxGen - person.generation;
+                    const baseY = topMargin + (normalizedGen * generationHeight);
+                    person.y = Math.max(baseY - 20, Math.min(baseY + 20, person.y));
+                });
+
+                links.selectAll('line')
+                    .attr('x1', d => people.find(p => p.id === d.person1_id).x)
+                    .attr('y1', d => people.find(p => p.id === d.person1_id).y)
+                    .attr('x2', d => people.find(p => p.id === d.person2_id).x)
+                    .attr('y2', d => people.find(p => p.id === d.person2_id).y);
+
+                links.selectAll('text')
+                    .attr('x', d => (people.find(p => p.id === d.person1_id).x + 
+                                   people.find(p => p.id === d.person2_id).x) / 2)
+                    .attr('y', d => {
+                        const y1 = people.find(p => p.id === d.person1_id).y;
+                        const y2 = people.find(p => p.id === d.person2_id).y;
+                        return (y1 + y2) / 2 - (d.type === 'spouse' ? 2 : 0);
+                    })
+                    .attr('dy', '.35em');
+
+                nodes.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        // Initial visualization load
+        document.addEventListener('DOMContentLoaded', refreshVisualization);
+    </script>
+</body>
+</html>
