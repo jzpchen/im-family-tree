@@ -421,7 +421,7 @@
                     .attr('y', d => {
                         const y1 = people.find(p => p.id === d.person1_id).y;
                         const y2 = people.find(p => p.id === d.person2_id).y;
-                        return (y1 + y2) / 2 - (d.type === 'spouse' ? 2 : 0);
+                        return (y1 + y2) / 2 - (d.type === 'spouse' ? 8 : 0);
                     })
                     .attr('dy', '.35em');
 
