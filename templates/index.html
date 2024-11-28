@@ -68,29 +68,33 @@
             height: 600px;
             border: 1px solid #ccc;
             margin: 20px 0;
+            overflow: hidden;
         }
-        .node circle {
+        .node rect {
             fill: #fff;
             stroke: #666;
             stroke-width: 2px;
         }
-        .link {
+        .link line {
             fill: none;
             stroke: #ccc;
             stroke-width: 2px;
-            stroke-dasharray: 5,5;
         }
         .relationship-label {
-            font-size: 12px;
-            fill: #999;
-        }
-        .relationship-label.spouse {
-            font-size: 14px;
+            font-size: 16px;
             fill: #666;
+            pointer-events: none;
         }
         .node text {
             font-size: 14px;
             pointer-events: none;
+        }
+        .node .name {
+            font-weight: bold;
+        }
+        .node .age {
+            font-size: 12px;
+            fill: #666;
         }
     </style>
 </head>
@@ -101,6 +105,10 @@
             <div class="form-group">
                 <label for="personName">Person Name:</label>
                 <input type="text" id="personName" placeholder="Enter name">
+            </div>
+            <div class="form-group">
+                <label for="personBirthday">Birthday:</label>
+                <input type="date" id="personBirthday">
             </div>
             <button onclick="addPerson()">Add Person</button>
 
@@ -143,61 +151,26 @@
 
     <script>
         let simulation = null;
-        let people = []; // Keep this as global for dropdowns
-        let currentData = null; // Store current data for resize handling
-            
-        function clearVisualization() {
-            d3.select('#familyTree').selectAll('*').remove();
-            if (simulation) {
-                simulation.stop();
-                simulation = null;
-            }
-        }
-
-        // Debounce function to prevent too many resize events
-        function debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
-
-        // Handle window resize
-        const handleResize = debounce(() => {
-            if (currentData && currentData.people && currentData.relationships) {
-                clearVisualization();
-                createVisualization(currentData.people, currentData.relationships);
-            }
-        }, 250); // Wait 250ms after resize ends before redrawing
-
-        window.addEventListener('resize', handleResize);
+        let currentData = null;
+        let people = [];
 
         async function refreshVisualization() {
             try {
                 const response = await fetch('/api/get_family_tree');
-                const data = await response.json();
-                
-                if (!data.people || !data.relationships) {
-                    console.error('Invalid data structure:', data);
-                    return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-
-                // Store current data for resize handling
+                const data = await response.json();
                 currentData = data;
-                
-                // Update global people array for dropdowns
                 people = data.people;
-                updatePersonSelects();
 
                 clearVisualization();
-                createVisualization(data.people, data.relationships);
+                if (data.people && data.people.length > 0) {
+                    createVisualization(data.people, data.relationships);
+                }
+                updatePersonSelects();
             } catch (error) {
-                console.error('Error refreshing visualization:', error);
+                console.error('Error fetching family tree:', error);
             }
         }
 
@@ -206,22 +179,28 @@
             selects.forEach(selectId => {
                 const select = document.getElementById(selectId);
                 if (select) {
-                    const currentValue = select.value; // Store current selection
+                    const currentValue = select.value;
                     select.innerHTML = '<option value="">Select a person</option>';
-                    people.forEach(person => {
-                        const option = document.createElement('option');
-                        option.value = person.id;
-                        option.textContent = person.name;
-                        select.appendChild(option);
-                    });
-                    if (currentValue) select.value = currentValue; // Restore selection if it exists
+                    if (people && people.length > 0) {
+                        people.forEach(person => {
+                            const option = document.createElement('option');
+                            option.value = person.id;
+                            option.textContent = person.name;
+                            select.appendChild(option);
+                        });
+                    }
+                    if (currentValue) select.value = currentValue;
                 }
             });
         }
 
         async function addPerson() {
             const name = document.getElementById('personName').value;
-            if (!name) return;
+            const birthday = document.getElementById('personBirthday').value;
+            if (!name) {
+                alert('Please enter a name');
+                return;
+            }
 
             try {
                 const response = await fetch('/api/add_person', {
@@ -229,7 +208,10 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ name }),
+                    body: JSON.stringify({ 
+                        name: name,
+                        birthday: birthday || null 
+                    }),
                 });
 
                 if (!response.ok) {
@@ -237,9 +219,11 @@
                 }
 
                 document.getElementById('personName').value = '';
+                document.getElementById('personBirthday').value = '';
                 await refreshVisualization();
             } catch (error) {
                 console.error('Error adding person:', error);
+                alert('Error adding person. Please try again.');
             }
         }
 
@@ -301,82 +285,211 @@
             }
         }
 
-        function createVisualization(people, relationships) {
-            const container = document.getElementById('familyTree');
+        function clearVisualization() {
+            d3.select('#familyTree').selectAll('*').remove();
+            if (simulation) {
+                simulation.stop();
+                simulation = null;
+            }
+        }
+
+        // Constants for visualization
+        const CONSTANTS = {
+            nodeWidth: 120,
+            nodeHeight: 60,
+            cornerRadius: 5,
+            heartSize: 24,
+            linkDistance: 200,
+            chargeStrength: -1500,
+            xForceStrength: 0.5,
+            yForceStrength: 1,
+            zoomExtent: [0.1, 3],
+            generationPadding: 3
+        };
+
+        // Utility functions
+        function calculateAge(birthday) {
+            if (!birthday) return '';
+            try {
+                const birthDate = new Date(birthday);
+                if (isNaN(birthDate.getTime())) return '';
+                const age = Math.floor((new Date() - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
+                return `${age}y`;
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function initializeSVG(container) {
             const width = container.offsetWidth;
             const height = container.offsetHeight;
-            const generationHeight = 80;
-            const topMargin = 40;
 
             const svg = d3.select('#familyTree')
                 .append('svg')
                 .attr('width', '100%')
                 .attr('height', '100%')
-                .attr('viewBox', [0, 0, width, height])
-                .attr('preserveAspectRatio', 'xMidYMid meet');
+                .attr('viewBox', [-width/2, -height/2, width, height])
+                .attr('style', 'max-width: 100%; height: auto;');
 
-            // Calculate generation levels
-            const maxGen = Math.max(...people.map(p => p.generation));
-            const minGen = Math.min(...people.map(p => p.generation));
-            const totalGenerations = maxGen - minGen + 1;
+            const g = svg.append('g');
+            svg.call(d3.zoom()
+                .scaleExtent(CONSTANTS.zoomExtent)
+                .on('zoom', (event) => g.attr('transform', event.transform)));
 
-            // Initial node positioning
-            people.forEach(person => {
+            return { svg, g, width, height };
+        }
+
+        function initializePositions(people, width, height, generationHeight, topMargin) {
+            people.forEach((person, i) => {
                 const genSize = people.filter(p => p.generation === person.generation).length;
                 const genIndex = people.filter(p => p.generation === person.generation)
                     .findIndex(p => p.id === person.id);
                 
-                // Center horizontally within generation
-                person.x = (width * (genIndex + 1)) / (genSize + 1);
-                
-                // Position vertically based on generation
-                const normalizedGen = maxGen - person.generation;
-                person.y = topMargin + (normalizedGen * generationHeight);
+                person.x = (width * (genIndex + 1)) / (genSize + 1) - width/2;
+                const normalizedGen = Math.max(...people.map(p => p.generation || 0)) - (person.generation || 0);
+                person.y = topMargin + (normalizedGen * generationHeight) - height/2;
             });
+        }
 
-            simulation = d3.forceSimulation(people)
-                .force('link', d3.forceLink(relationships.map(r => ({
-                    source: people.find(p => p.id === r.person1_id),
-                    target: people.find(p => p.id === r.person2_id),
-                    type: r.type
-                }))).id(d => d.id).distance(100))
-                .force('charge', d3.forceManyBody().strength(-500))
-                .force('collide', d3.forceCollide().radius(40))
-                .force('x', d3.forceX().x(d => d.x).strength(0.5))
-                .force('y', d3.forceY().y(d => d.y).strength(1));
+        function createVisualization(people, relationships) {
+            if (!people || people.length === 0) return;
 
-            const links = svg.append('g')
+            // Clear previous visualization
+            d3.select('#familyTree').selectAll('*').remove();
+
+            // Initialize SVG
+            const container = document.getElementById('familyTree');
+            const { svg, g, width, height } = initializeSVG(container);
+
+            // Calculate generation layout
+            const maxGen = Math.max(...people.map(p => p.generation || 0));
+            const minGen = Math.min(...people.map(p => p.generation || 0));
+            const generationHeight = height / (maxGen - minGen + CONSTANTS.generationPadding);
+            const topMargin = generationHeight;
+
+            // Initialize positions
+            initializePositions(people, width, height, generationHeight, topMargin);
+
+            // Create links group
+            const linkElements = g.append('g')
                 .selectAll('g')
                 .data(relationships)
                 .enter()
                 .append('g');
 
-            links.append('line')
-                .attr('class', d => `link ${d.type}`);
+            // Add relationship lines
+            linkElements.append('line')
+                .attr('class', 'link')
+                .style('stroke', '#ccc')
+                .style('stroke-width', '2px');
 
-            links.append('text')
-                .attr('class', d => `relationship-label ${d.type}`)
+            // Add spouse hearts
+            linkElements
+                .filter(d => d.relationship_type === 'spouse')
+                .append('text')
+                .attr('class', 'relationship-label')
                 .attr('text-anchor', 'middle')
-                .html(d => d.type === 'spouse' ? '❤️' : '');
+                .attr('dominant-baseline', 'middle')
+                .style('font-size', `${CONSTANTS.heartSize}px`)
+                .style('fill', '#ff69b4')
+                .text('❤️');
 
-            const nodes = svg.append('g')
+            // Create nodes group
+            const nodes = g.append('g')
                 .selectAll('g')
                 .data(people)
                 .enter()
                 .append('g')
-                .attr('class', 'node')
                 .call(d3.drag()
                     .on('start', dragstarted)
                     .on('drag', dragged)
                     .on('end', dragended));
 
-            nodes.append('circle')
-                .attr('r', 30);
+            // Add node rectangles
+            nodes.append('rect')
+                .attr('width', CONSTANTS.nodeWidth)
+                .attr('height', CONSTANTS.nodeHeight)
+                .attr('rx', CONSTANTS.cornerRadius)
+                .attr('ry', CONSTANTS.cornerRadius)
+                .style('fill', '#fff')
+                .style('stroke', '#999');
 
+            // Add name text
             nodes.append('text')
+                .attr('class', 'name')
+                .attr('x', CONSTANTS.nodeWidth / 2)
+                .attr('y', CONSTANTS.nodeHeight / 2 - 10)
                 .attr('text-anchor', 'middle')
-                .attr('dy', '.3em')
+                .attr('dominant-baseline', 'middle')
                 .text(d => d.name);
+
+            // Add age text
+            nodes.append('text')
+                .attr('class', 'age')
+                .attr('x', CONSTANTS.nodeWidth / 2)
+                .attr('y', CONSTANTS.nodeHeight / 2 + 10)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .text(d => calculateAge(d.birthday));
+
+            // Set up force simulation
+            simulation = d3.forceSimulation(people)
+                .force('link', d3.forceLink()
+                    .id(d => d.id)
+                    .links(relationships.map(r => ({
+                        source: r.person1_id,
+                        target: r.person2_id,
+                        type: r.relationship_type
+                    })))
+                    .distance(CONSTANTS.linkDistance))
+                .force('charge', d3.forceManyBody()
+                    .strength(CONSTANTS.chargeStrength))
+                .force('x', d3.forceX(d => d.x).strength(CONSTANTS.xForceStrength))
+                .force('y', d3.forceY(d => d.y).strength(CONSTANTS.yForceStrength))
+                .force('collide', d3.forceCollide().radius(CONSTANTS.nodeWidth))
+                .on('tick', () => {
+                    // Keep nodes within bounds and maintain generation levels
+                    people.forEach(d => {
+                        d.x = Math.max(-width/2 + CONSTANTS.nodeWidth, Math.min(width/2 - CONSTANTS.nodeWidth, d.x));
+                        const normalizedGen = maxGen - (d.generation || 0);
+                        d.y = topMargin + (normalizedGen * generationHeight) - height/2;
+                    });
+
+                    // Update link positions
+                    linkElements.selectAll('line')
+                        .attr('x1', d => {
+                            const source = people.find(p => p.id === d.person1_id);
+                            return source ? source.x : 0;
+                        })
+                        .attr('y1', d => {
+                            const source = people.find(p => p.id === d.person1_id);
+                            return source ? source.y : 0;
+                        })
+                        .attr('x2', d => {
+                            const target = people.find(p => p.id === d.person2_id);
+                            return target ? target.x : 0;
+                        })
+                        .attr('y2', d => {
+                            const target = people.find(p => p.id === d.person2_id);
+                            return target ? target.y : 0;
+                        });
+
+                    // Update heart positions
+                    linkElements.selectAll('.relationship-label')
+                        .attr('x', d => {
+                            const source = people.find(p => p.id === d.person1_id);
+                            const target = people.find(p => p.id === d.person2_id);
+                            return source && target ? (source.x + target.x) / 2 : 0;
+                        })
+                        .attr('y', d => {
+                            const source = people.find(p => p.id === d.person1_id);
+                            const target = people.find(p => p.id === d.person2_id);
+                            return source && target ? (source.y + target.y) / 2 - 15 : 0;
+                        });
+
+                    // Update node positions
+                    nodes.attr('transform', d => `translate(${d.x - CONSTANTS.nodeWidth/2},${d.y - CONSTANTS.nodeHeight/2})`);
+                });
 
             function dragstarted(event, d) {
                 if (!event.active) simulation.alphaTarget(0.3).restart();
@@ -386,10 +499,8 @@
 
             function dragged(event, d) {
                 d.fx = event.x;
-                // Keep vertical position exactly at generation level
-                const normalizedGen = maxGen - d.generation;
-                const baseY = topMargin + (normalizedGen * generationHeight);
-                d.fy = baseY;
+                const normalizedGen = maxGen - (d.generation || 0);
+                d.fy = topMargin + (normalizedGen * generationHeight) - height/2;
             }
 
             function dragended(event, d) {
@@ -397,37 +508,30 @@
                 d.fx = null;
                 d.fy = null;
             }
-
-            simulation.on('tick', () => {
-                // Keep nodes within bounds
-                people.forEach(person => {
-                    person.x = Math.max(40, Math.min(width - 40, person.x));
-                    
-                    // Keep vertical position exactly at generation level
-                    const normalizedGen = maxGen - person.generation;
-                    const baseY = topMargin + (normalizedGen * generationHeight);
-                    person.y = baseY;
-                });
-
-                links.selectAll('line')
-                    .attr('x1', d => people.find(p => p.id === d.person1_id).x)
-                    .attr('y1', d => people.find(p => p.id === d.person1_id).y)
-                    .attr('x2', d => people.find(p => p.id === d.person2_id).x)
-                    .attr('y2', d => people.find(p => p.id === d.person2_id).y);
-
-                links.selectAll('text')
-                    .attr('x', d => (people.find(p => p.id === d.person1_id).x + 
-                                   people.find(p => p.id === d.person2_id).x) / 2)
-                    .attr('y', d => {
-                        const y1 = people.find(p => p.id === d.person1_id).y;
-                        const y2 = people.find(p => p.id === d.person2_id).y;
-                        return (y1 + y2) / 2 - (d.type === 'spouse' ? 8 : 0);
-                    })
-                    .attr('dy', '.35em');
-
-                nodes.attr('transform', d => `translate(${d.x},${d.y})`);
-            });
         }
+
+        // Debounce function to prevent too many resize events
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        // Handle window resize
+        const handleResize = debounce(() => {
+            if (currentData && currentData.people && currentData.relationships) {
+                clearVisualization();
+                createVisualization(currentData.people, currentData.relationships);
+            }
+        }, 250); // Wait 250ms after resize ends before redrawing
+
+        window.addEventListener('resize', handleResize);
 
         // Initial visualization load
         document.addEventListener('DOMContentLoaded', refreshVisualization);
