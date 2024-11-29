@@ -197,5 +197,51 @@ def check_relationship():
         traceback.print_exc()
         return jsonify({'error': 'Server error while checking relationship'}), 500
 
+@app.route('/api/delete_person/<int:person_id>', methods=['DELETE'])
+def delete_person(person_id):
+    try:
+        # First delete all relationships involving this person
+        Relationship.query.filter(
+            (Relationship.person1_id == person_id) | 
+            (Relationship.person2_id == person_id)
+        ).delete()
+        
+        # Then delete the person
+        person = Person.query.get(person_id)
+        if person:
+            db.session.delete(person)
+            db.session.commit()
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Person not found'}), 404
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/update_person/<int:person_id>', methods=['PUT'])
+def update_person(person_id):
+    try:
+        person = Person.query.get(person_id)
+        if not person:
+            return jsonify({'success': False, 'error': 'Person not found'}), 404
+
+        data = request.get_json()
+        if 'name' in data:
+            person.name = data['name']
+        if 'birthday' in data:
+            person.birthday = data['birthday']
+
+        db.session.commit()
+        return jsonify({
+            'success': True, 
+            'person': {
+                'id': person.id,
+                'name': person.name,
+                'birthday': person.birthday
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, port=3333)

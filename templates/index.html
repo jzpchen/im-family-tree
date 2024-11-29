@@ -96,6 +96,54 @@
             font-size: 12px;
             fill: #666;
         }
+        .context-menu {
+            position: absolute;
+            display: none;
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .context-menu-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .context-menu-item:hover {
+            background-color: #f0f0f0;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .modal input {
+            margin: 5px 0;
+            padding: 5px;
+            width: 200px;
+        }
+        .modal button {
+            margin: 5px;
+            padding: 5px 10px;
+        }
+        .overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 999;
+        }
     </style>
 </head>
 <body>
@@ -403,16 +451,50 @@
                 .call(d3.drag()
                     .on('start', dragstarted)
                     .on('drag', dragged)
-                    .on('end', dragended));
+                    .on('end', dragended))
+                .on('contextmenu', function(event, d) {  
+                    event.preventDefault();
+                    
+                    // Position and show context menu
+                    contextMenu
+                        .style('left', (event.pageX + 5) + 'px')
+                        .style('top', (event.pageY + 5) + 'px')
+                        .style('display', 'block')
+                        .html('')
+                        .append('div')
+                        .attr('class', 'context-menu-item')
+                        .text('Delete Person')
+                        .on('click', () => deletePerson(d));
 
-            // Add node rectangles
+                    contextMenu.append('div')
+                        .attr('class', 'context-menu-item')
+                        .text('Edit Person')
+                        .on('click', () => showEditModal(d));
+
+                    // Hide context menu when clicking elsewhere
+                    d3.select('body').on('click', () => {
+                        contextMenu.style('display', 'none');
+                    });
+                })
+                .on('click', function(event, d) {  
+                    event.stopPropagation();
+                    // Remove previous selections
+                    nodes.selectAll('rect').style('stroke', '#999').style('stroke-width', '1px');
+                    // Highlight selected node
+                    d3.select(this).select('rect')
+                        .style('stroke', '#007bff')
+                        .style('stroke-width', '3px');
+                });
+
+            // Add rectangles (instead of circles)
             nodes.append('rect')
                 .attr('width', CONSTANTS.nodeWidth)
                 .attr('height', CONSTANTS.nodeHeight)
                 .attr('rx', CONSTANTS.cornerRadius)
                 .attr('ry', CONSTANTS.cornerRadius)
                 .style('fill', '#fff')
-                .style('stroke', '#999');
+                .style('stroke', '#999')
+                .style('stroke-width', '1px');  
 
             // Add name text
             nodes.append('text')
@@ -535,6 +617,198 @@
 
         // Initial visualization load
         document.addEventListener('DOMContentLoaded', refreshVisualization);
+
+        // Add context menu for node actions
+        const contextMenu = d3.select('body')
+            .append('div')
+            .attr('class', 'context-menu')
+            .style('position', 'absolute')
+            .style('display', 'none')
+            .style('background-color', 'white')
+            .style('border', '1px solid #ccc')
+            .style('border-radius', '4px')
+            .style('padding', '5px')
+            .style('box-shadow', '0 2px 5px rgba(0,0,0,0.2)');
+
+        // Add CSS for context menu items
+        const style = document.createElement('style');
+        style.textContent = `
+            .context-menu-item {
+                padding: 8px 12px;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            .context-menu-item:hover {
+                background-color: #f0f0f0;
+            }
+            .modal {
+                display: none;
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background-color: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                z-index: 1000;
+            }
+            .modal input {
+                margin: 5px 0;
+                padding: 5px;
+                width: 200px;
+            }
+            .modal button {
+                margin: 5px;
+                padding: 5px 10px;
+            }
+            .overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0,0,0,0.5);
+                z-index: 999;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Add modal for editing person
+        const modal = d3.select('body')
+            .append('div')
+            .attr('class', 'modal')
+            .style('display', 'none');
+
+        const overlay = d3.select('body')
+            .append('div')
+            .attr('class', 'overlay');
+
+        // Update node click handlers
+        nodes.on('contextmenu', function(event, d) {
+            event.preventDefault();
+            
+            // Position and show context menu
+            contextMenu
+                .style('left', (event.pageX + 5) + 'px')
+                .style('top', (event.pageY + 5) + 'px')
+                .style('display', 'block')
+                .html('')
+                .append('div')
+                .attr('class', 'context-menu-item')
+                .text('Delete Person')
+                .on('click', () => deletePerson(d))
+                .append('div')
+                .attr('class', 'context-menu-item')
+                .text('Edit Person')
+                .on('click', () => showEditModal(d));
+
+            // Hide context menu when clicking elsewhere
+            d3.select('body').on('click', () => {
+                contextMenu.style('display', 'none');
+            });
+        });
+
+        function deletePerson(person) {
+            if (confirm(`Are you sure you want to delete ${person.name}?`)) {
+                fetch(`/api/delete_person/${person.id}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        refreshFamilyTree();
+                    } else {
+                        alert('Error deleting person: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error deleting person');
+                });
+            }
+        }
+
+        function showEditModal(person) {
+            modal.html('')
+                .style('display', 'block')
+                .append('h3')
+                .text('Edit Person');
+
+            modal.append('input')
+                .attr('type', 'text')
+                .attr('id', 'editName')
+                .attr('value', person.name)
+                .attr('placeholder', 'Name');
+
+            modal.append('br');
+
+            modal.append('input')
+                .attr('type', 'date')
+                .attr('id', 'editBirthday')
+                .attr('value', person.birthday)
+                .attr('placeholder', 'Birthday');
+
+            modal.append('br');
+
+            modal.append('button')
+                .text('Save')
+                .on('click', () => updatePerson(person.id));
+
+            modal.append('button')
+                .text('Cancel')
+                .on('click', closeModal);
+
+            overlay.style('display', 'block')
+                .on('click', closeModal);
+        }
+
+        function closeModal() {
+            modal.style('display', 'none');
+            overlay.style('display', 'none');
+        }
+
+        function updatePerson(personId) {
+            const name = document.getElementById('editName').value;
+            const birthday = document.getElementById('editBirthday').value;
+
+            fetch(`/api/update_person/${personId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: name,
+                    birthday: birthday
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    closeModal();
+                    refreshFamilyTree();
+                } else {
+                    alert('Error updating person: ' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Error updating person');
+            });
+        }
+
+        function refreshFamilyTree() {
+            fetch('/api/get_family_tree')
+                .then(response => response.json())
+                .then(data => {
+                    createVisualization(data.people, data.relationships);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error refreshing family tree');
+                });
+        }
     </script>
 </body>
 </html>
